@@ -20,7 +20,7 @@ print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50257  # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
+    vocab_size: int = 50304  # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
