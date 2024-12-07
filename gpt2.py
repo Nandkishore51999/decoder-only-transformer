@@ -8,6 +8,9 @@ import tiktoken
 
 assert torch.cuda.is_available(), 'cuda not found'
 device = 'cuda'
+torch.cuda.manual_seed(42)
+torch.set_float32_matmul_precision('medium')
+USE_FLASH_ATTENTION=1
 
 
 class DataloaderLite:
@@ -68,7 +71,10 @@ class CasualSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
+        # Not helpful for me since Triton is not compatible with Windows and cant install flash-attention library
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # flash attention
+
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)

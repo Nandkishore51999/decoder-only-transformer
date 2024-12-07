@@ -13,6 +13,8 @@ assert torch.cuda.is_available(), 'cuda not found'
 device = 'cuda'
 torch.cuda.manual_seed(42)
 torch.set_float32_matmul_precision('medium')
+USE_FLASH_ATTENTION=1
+print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
 
 
 @dataclass
@@ -31,10 +33,11 @@ model = GPT(GPTConfig())
 model.eval()
 model.to(device)
 
-
-
-num_return_sequnces = 5
-max_length = 30
+# Take some time at starting but reduces the training time so much
+# Basically, first it scan entire cod and check what are the operations happening and then optimize those.
+# aka Kernel fusion
+# as of Dec 2024, does not support on Windows
+# model = torch.compile(model)
 
 
 train_loader = DataloaderLite(B=4, T=1024)  # optimal value for RTX 4070ti (12GM VRAM) > 6, 1024 > 4, 1024
@@ -77,6 +80,10 @@ model_save_path = f"gpt2_124M_{iterations}.pth"
 torch.save(model.state_dict(), model_save_path)
 
 import sys; sys.exit(0)
+
+
+num_return_sequnces = 5
+max_length = 30
 
 tokens = enc.encode("Hello, who are you?")
 tokens = torch.tensor(tokens, dtype=torch.long)
