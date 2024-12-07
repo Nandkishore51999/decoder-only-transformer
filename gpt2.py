@@ -27,6 +27,7 @@ class DataloaderLite:
         print(f"1 epoch = {len(self.tokens) // (B*T) } batches")
 
         self.current_position = 0
+        self.no_epochs = 0
 
     def next_batch(self):
         B, T = self.B, self.T
@@ -39,16 +40,8 @@ class DataloaderLite:
         # when we run out of data, then reset and starts new epoch
         if self.current_position + B*T+1 > len(self.tokens):
             self.current_position = 0
-        return x, y
-
-
-@dataclass
-class GPTConfig:
-    block_size: int = 1024
-    vocab_size: int = 50257  # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
+            self.no_epochs += 1
+        return x, y, self.no_epochs
 
 
 class CasualSelfAttention(nn.Module):
@@ -80,7 +73,6 @@ class CasualSelfAttention(nn.Module):
         # output projection
         y = self.c_proj(y)
         return y
-
 
 
 class MLP(nn.Module):
@@ -176,75 +168,3 @@ class GPT(nn.Module):
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
                                    targets.view(-1))
         return logits, loss
-
-
-torch.cuda.manual_seed(42)
-model = GPT(GPTConfig())
-# this is a good practice to put model to eval when we are not going to train it.
-# usually model have different behaviour at training and evaluation time i.e. Dropout, Batch-Norm
-# In our case, it does not have any difference
-model.eval()
-model.to(device)
-
-
-
-num_return_sequnces = 5
-max_length = 30
-
-
-train_loader = DataloaderLite(B=4, T=32)
-
-# lr = 3e-4 is a good default value for early debugging stages
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-for i in range(5000):
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)  # here we are sending the tokens from CPU to GPU
-    # always remember to start with zero gradient
-    optimizer.zero_grad()
-    logits, loss = model(x, y)
-
-    # add to gradients += operation
-    loss.backward()
-
-    # to update the params and to decrease the loss
-    optimizer.step()
-    print(f"step: {i}\tLoss: {loss.item()}")  # loss.item() will convert the tensor to float, so it lives in CPU.
-
-
-# at starting point (first loss value), when probability of each vocab in our vocabulary is equal due to random initialization,
-# expected loss ~ -ln(1/50257) ~10.8
-print(loss)
-
-import sys; sys.exit(0)
-
-# tokens = enc.encode("Hello, who are you?")
-# tokens = torch.tensor(tokens, dtype=torch.long)
-# tokens = tokens.unsqueeze(0).repeat(num_return_sequnces, 1)  # # (B, length on tokens after encoding the text)
-# x = tokens.to(device)
-# print(x)
-
-
-while x.size(1) < max_length:
-    with torch.no_grad():  # telling pytorch that we will not be calling backward on any of below steps so it doesn't have to cache all the intermediate tensors
-        logits = model(x) # shpae (B, T, vocab_size)
-        print(logits)
-        logits = logits[:, -1, :]  # takes only last logits which are the prediction # shpae (B, vocab_size)
-        probs = F.softmax(logits, dim=-1)
-        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)  # doing topK sampling, shape (B, 50), (B, 50), Helps in keeping the model on track (HOW???)
-
-        print(topk_probs)
-        ix = torch.multinomial(topk_probs, 1)  # select a token from top-k probabilities (B, 1)
-        xcol = torch.gather(topk_indices, -1 , ix)  # (B, 1)
-        x = torch.cat((x, xcol), dim=1)
-
-
-
-
-for i in range(num_return_sequnces):
-    tokens = x[i, :max_length].tolist()
-    decode = enc.decode(tokens)
-    print("> ", decode)
-
-
-
-
