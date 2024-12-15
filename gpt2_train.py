@@ -1,38 +1,44 @@
-import math
-from dataclasses import dataclass
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-import text_preprocessing
-import tiktoken
 from gpt2 import *
 import time
+import nanoid
 
-model_t0 = time.time()
+total_time_t0 = time.time()
+
+data_dir = r"C:\Workspace-ML\text_data\BM"
+B = 8
+T = 512
+GPTConfig.block_size = T
+train_loader = DataloaderLite(B=B, T=T, data="train", data_dir=data_dir)  # optimal value for RTX 4070ti (12GM VRAM) > 6, 1024 > 4, 1024
+val_loader = DataloaderLite(B=B, T=T, data="val", data_dir=data_dir)
+
+print(f"Data Load Time: {(time.time() - total_time_t0)/60} Min")
+
+max_lr = 6e-5
+min_lr = max_lr * 0.1
+max_steps = 100
+warmup_steps = int(0.05*max_steps)
+
+val_step_unit = int(max_steps/1)
+model_ckpt_step_unit = int(max_steps/1)
+
+# create the log directory we will write checkpoints to and log to
+log_dir = f"log_{nanoid.generate(size=6)}_{GPTConfig.block_size}_BlockSize_{max_steps}_Steps_{B}_B_{T}_T"
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, f"log.txt")
+with open(log_file, "w") as f:
+    pass
 
 
 assert torch.cuda.is_available(), 'cuda not found'
 device = 'cuda'
+torch.cuda.empty_cache()
 torch.cuda.manual_seed(42)
 torch.set_float32_matmul_precision('medium')
 USE_FLASH_ATTENTION=1
 print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
-
-
-@dataclass
-class GPTConfig:
-    block_size: int = 1024
-    vocab_size: int = 50304  # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
-
+# torch.backends.cudnn.benchmark = True
 
 model = GPT(GPTConfig())
-# this is a good practice to put model to eval when we are not going to train it.
-# usually model have different behaviour at training and evaluation time i.e. Dropout, Batch-Norm
-# In our case, it does not have any difference
-model.eval()
 model.to(device)
 
 # Take some time at starting but reduces the training time so much
@@ -42,13 +48,6 @@ model.to(device)
 # model = torch.compile(model)
 
 
-train_loader = DataloaderLite(B=4, T=1024)  # optimal value for RTX 4070ti (12GM VRAM) > 6, 1024 > 4, 1024
-
-
-max_lr = 6e-4
-min_lr = max_lr * 0.1
-warmup_steps = 10
-max_steps = 25000
 def get_lr(it):
     if it < warmup_steps:
         return max_lr * (it+1) / warmup_steps
@@ -68,6 +67,39 @@ optimizer = model.config_optimizer(weight_decay=0.1, learning_rate=6e-4, device=
 
 for step in range(max_steps):
     t1 = time.time()
+
+    last_step = (step == max_steps - 1)
+
+    if step % val_step_unit == 0 or last_step:
+        model.eval()
+        # val_loader.reset()
+        with torch.no_grad():
+            val_loss_accum = 0.0
+            val_loss_steps = 20
+            for _ in range(val_loss_steps):
+                x, y, _ = val_loader.next_batch()
+                x, y = x.to(device), y.to(device)
+                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                    logits, loss = model(x, y)
+                loss = loss / val_loss_steps
+                val_loss_accum += loss.detach()
+
+        print(f"validation loss: {val_loss_accum.item():.4f}")
+        with open(log_file, "a") as f:
+            f.write(f"{step} val {val_loss_accum.item():.4f}\n")
+        if step > 0 and (step % model_ckpt_step_unit == 0 or last_step):
+            # optionally write model checkpoints
+            checkpoint_path = os.path.join(log_dir, f"model_{step}.pt")
+            checkpoint = {
+                'model': model.state_dict(),
+                'config': model.config,
+                'optimizer': optimizer.state_dict(),
+                'step': step,
+                'val_loss': val_loss_accum.item(),
+                'lr': get_lr(step)
+            }
+            torch.save(checkpoint, checkpoint_path)
+
     x, y, no_epochs = train_loader.next_batch()
     x, y = x.to(device), y.to(device)  # here we are sending the tokens from CPU to GPU
     # always remember to start with zero gradient
@@ -92,58 +124,30 @@ for step in range(max_steps):
     t2 = time.time()
     dt = (t2-t1)*1000
     tokens_per_sec = (train_loader.B * train_loader.T)/dt
-    # if i % 10 == 0:
+
     print(f"Step: {step} | Loss: {loss.item()} | Lr: {lr:0.4e} | norm: {norm:.4f} | dt: {dt:.2f}ms | tokens/sec: {tokens_per_sec:.2f}")  # loss.item() will convert the tensor to float, so it lives in CPU.
-    if step in [10000, 25000]:
-        model_save_path = f"gpt2_124M_{step}.pth"
-        torch.save(model.state_dict(), model_save_path)
+    with open(log_file, "a") as f:
+        f.write(f"{step} train {loss.item():.6f}\n")
+        f.write(f"{step} lr {lr:0.4e}\n")
 
 print("total_epochs: ", no_epochs)
 
 # at starting point (first loss value), when probability of each vocab in our vocabulary is equal due to random initialization,
 # expected loss ~ -ln(1/50257) ~10.8
 print(loss)
-model_save_path = f"gpt2_124M_{max_steps}.pth"
+
+model_save_path = os.path.join(log_dir, f"gpt2_124M_Final.pt")
 torch.save(model.state_dict(), model_save_path)
 
 
-model_t2 = time.time()
-print(f"Total time taken: {(model_t2-model_t0)/60}min")
+total_time_t1 = time.time()
+print(f"Total time taken: {(total_time_t1 - total_time_t0) / 60} Min")
 
 import sys; sys.exit(0)
 
-
-num_return_sequnces = 5
-max_length = 30
-
-tokens = enc.encode("Hello, who are you?")
-tokens = torch.tensor(tokens, dtype=torch.long)
-tokens = tokens.unsqueeze(0).repeat(num_return_sequnces, 1)  # # (B, length on tokens after encoding the text)
-x = tokens.to(device)
-print(x)
-
-
-while x.size(1) < max_length:
-    with torch.no_grad():  # telling pytorch that we will not be calling backward on any of below steps so it doesn't have to cache all the intermediate tensors
-        logits = model(x) # shpae (B, T, vocab_size)
-        print(logits)
-        logits = logits[:, -1, :]  # takes only last logits which are the prediction # shpae (B, vocab_size)
-        probs = F.softmax(logits, dim=-1)
-        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)  # doing topK sampling, shape (B, 50), (B, 50), Helps in keeping the model on track (HOW???)
-
-        print(topk_probs)
-        ix = torch.multinomial(topk_probs, 1)  # select a token from top-k probabilities (B, 1)
-        xcol = torch.gather(topk_indices, -1 , ix)  # (B, 1)
-        x = torch.cat((x, xcol), dim=1)
-
-
-
-
-for i in range(num_return_sequnces):
-    tokens = x[i, :max_length].tolist()
-    decode = enc.decode(tokens)
-    print("> ", decode)
-
+# this is a good practice to put model to eval when we are not going to train it.
+# usually model have different behaviour at training and evaluation time i.e. Dropout, Batch-Norm
+# model.eval()
 
 
 
