@@ -4,6 +4,8 @@ import torch.nn.functional as F
 
 from torch.utils.data import TensorDataset, DataLoader
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 
 import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -86,8 +88,22 @@ class DecoderOnlyTransformer(L.LightningModule):
         return fc_layer_output
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=0.001)
+        optimizer = Adam(self.parameters(), lr=0.001)
+        scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min",  # Minimize the monitored metric (e.g., loss)
+            factor=0.5,  # Reduce the learning rate by this factor
+            patience=10,  # Wait 10 epochs with no improvement before reducing
+            verbose=True  # Print a message when the learning rate is reduced
+        )
 
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "train_loss",  # Metric to monitor for scheduler adjustments
+            },
+        }
     def training_step(self, batch, batch_idx):
         input_tokens, labels = batch
         output = self.forward(input_tokens[0])
@@ -103,6 +119,6 @@ if __name__ == '__main__':
     model = DecoderOnlyTransformer(n_tokens=vocab_size, d_model=64, max_len=1024).to(device)
     print(next(model.parameters()).device)
 
-    logger = TensorBoardLogger("tb_logs", name="my_model")
+    logger = TensorBoardLogger("tb_logs", name="model-lr-scheduler-long-seq-dataset")
     trainer = L.Trainer(max_epochs=5000, log_every_n_steps=25, accelerator="gpu", devices=1, logger=logger)
     trainer.fit(model, train_dataloaders=dataloader)

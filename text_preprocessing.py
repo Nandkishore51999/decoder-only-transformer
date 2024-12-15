@@ -51,7 +51,7 @@ def tokens_to_tensors(input_text_list):
     return all_text_tensors, vocab_size, tokens_to_idx, idx_to_tokens
 
 
-def create_input_output_pairs(all_text_tensors, sequence_length=10, stride=3):
+def create_input_output_pairs(all_text_tensors, sequence_length=32, stride=8):
     # text = text.replace("\n", " ").strip()
     # tokens = text.split()  # Simple tokenization (split by whitespace)
 
@@ -72,8 +72,8 @@ def data_loader(inputs, labels):
 
     # Create dataset and dataloader
     dataset = TensorDataset(inputs, labels)
-    # dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
-    dataloader = DataLoader(dataset)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
+    # dataloader = DataLoader(dataset)
     return dataloader
 
 
