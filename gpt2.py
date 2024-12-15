@@ -1,10 +1,11 @@
 import inspect
 import math
+import os
+import traceback
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import text_preprocessing
 import tiktoken
 
 assert torch.cuda.is_available(), 'cuda not found'
@@ -14,16 +15,41 @@ torch.set_float32_matmul_precision('medium')
 USE_FLASH_ATTENTION=1
 
 
+def read_text_files(folder_path):
+    combined_text = ""
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith(".txt"):
+            file_path = os.path.join(folder_path, file_name)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    combined_text += f.read()
+            except:
+                traceback.print_exc()
+    return combined_text
+
+
+@dataclass
+class GPTConfig:
+    block_size: int = 1024
+    vocab_size: int = 50304  # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
+    n_layer: int = 12
+    n_head: int = 12
+    n_embd: int = 768
+
+
 class DataloaderLite:
-    def __init__(self, B, T):
+    def __init__(self, B, T, data, data_dir):
         self.B = B
         self.T = T
 
         enc = tiktoken.get_encoding('gpt2')
 
-        # BPE tokeniser has compression ratio of 3:1. given 1000 characters > approx 300 tokens
+        # BPE tokeniser has compression ratio of 3~4:1. given 1000 characters > approx 300 tokens
         # ascii chars each takes 1 bit memory, so file size equals to no of chars in it.
-        text = text_preprocessing.read_text_files("C:\\Workspace-ML\\text_data")
+        if data == 'train':
+            text = read_text_files(data_dir + "/train")
+        elif data == 'val':
+            text = read_text_files(data_dir + "/val")
 
         # currently here all the tokens are in CPU, we don't want to waste GPU memory for this
         self.tokens = enc.encode(text)
@@ -42,6 +68,9 @@ class DataloaderLite:
         self.current_position += B*T+1
 
         # when we run out of data, then reset and starts new epoch
+        # lets say input token count > 1Million
+        # for B,T = 4, 1024 > to take entire dataset in single loop > 1M/(1024*4) = 244 batches
+        # We ran 2500 training steps > how many times our entire data was repeated for training = 2500/244
         if self.current_position + B*T+1 > len(self.tokens):
             self.current_position = 0
             self.no_epochs += 1

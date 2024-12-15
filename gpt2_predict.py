@@ -2,7 +2,7 @@ import traceback
 
 from flask import Flask, request, jsonify
 import torch
-from gpt2_train import GPT, GPTConfig
+from gpt2 import GPT, GPTConfig
 import tiktoken
 import torch.nn.functional as F
 
@@ -14,30 +14,39 @@ enc = tiktoken.get_encoding('gpt2')
 loaded_models = {}
 
 
-def load_model(model_name):
-    if model_name not in loaded_models:
-        model = GPT(GPTConfig()).to(device)
-        model_path = "models/gpt2_124M_BT_4_32/"+model_name+".pth"
-        model.load_state_dict(torch.load(model_path, weights_only=True))
+def load_model(model_path):
+    if model_path not in loaded_models:
+        # print(f"Model {model_name} not already loaded...")
+        # model = GPT(GPTConfig()).to(device)
+        # model_path = "log_dec11_30000_Steps/"+model_name+".pt"
+        # model.load_state_dict(torch.load(model_path))
+        # model.eval()
+        #
+        # loaded_models[model_name] = model
+
+        # model_path = "log_dec11_30000_Steps/" + model_name + ".pt"
+        model = GPT(GPTConfig())
+        model.to(device)
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint['model'])
         model.eval()
+        loaded_models[model_path] = model
+    return loaded_models[model_path]
 
-        loaded_models[model_name] = model
-    return loaded_models[model_name]
 
-
-@app.route('/gpt2', methods=['GET', 'POST'])
+@app.route('/gpt2', methods=['POST'])
 def generate_text():
     try:
         if request.method == 'POST':
             # Extract form data
-            model_name = request.form['model_name']
+            model_path = request.form['model_path']
             input_text = request.form['input_text']
             max_length = int(request.form['max_length'])
             num_return_sequences = int(request.form['num_return_sequences'])
 
-            output = []
+            output = ""
             # Load model and tokenizer
-            model = load_model(model_name)
+            model = load_model(model_path)
 
             tokens = enc.encode(input_text)
             tokens = torch.tensor(tokens, dtype=torch.long)
@@ -57,13 +66,14 @@ def generate_text():
             for i in range(num_return_sequences):
                 tokens = x[i, :max_length].tolist()
                 decode = enc.decode(tokens)
-                output.append({i: decode})
+                output += f"{i}: {decode} \n=========================================================================\n"
             return output
         else:
             return "Only POST method supported"
     except Exception as e:
         traceback.print_exc()
         return e
+
 
 if __name__ == '__main__':
     app.run(debug=False)
