@@ -1,3 +1,5 @@
 lightning_logs
 log_*
 *.log
+models
+tb_logs
