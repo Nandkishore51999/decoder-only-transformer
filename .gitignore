@@ -3,3 +3,5 @@ log_*
 *.log
 models
 tb_logs
+.idea
+.ipynb_checkpoints
