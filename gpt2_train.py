@@ -1,12 +1,25 @@
 from gpt2 import *
 import time
 import nanoid
+import argparse
 
 total_time_t0 = time.time()
 
+# Parse command-line arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('--B', type=int, default=8)
+parser.add_argument('--T', type=int, default=1024)
+parser.add_argument('--max_steps', type=int, default=100)
+args = parser.parse_args()
+
+B = args.B  # Use the passed argument for the batch size
+T = args.T  # Use the passed argument for the batch size
+max_steps = args.max_steps  # Use the passed argument for the batch size
+
+
 data_dir = "edu_fineweb10B"
-B = 8
-T = 1024
+# B = 8
+# T = 1024
 GPTConfig.block_size = T
 train_loader = DataLoaderNumpy(B=B, T=T, data="train", data_dir=data_dir)  # optimal value for RTX 4070ti (12GM VRAM) > 6, 1024 > 4, 1024
 val_loader = DataLoaderNumpy(B=B, T=T, data="val", data_dir=data_dir)
@@ -15,7 +28,7 @@ print(f"Data Load Time: {(time.time() - total_time_t0)/60} Min")
 
 max_lr = 6e-5
 min_lr = max_lr * 0.1
-max_steps = 100
+# max_steps = 100
 warmup_steps = int(0.03*max_steps)
 
 val_step_unit = int(max_steps/1)
