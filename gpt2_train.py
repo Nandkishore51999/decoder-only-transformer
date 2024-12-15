@@ -16,7 +16,7 @@ print(f"Data Load Time: {(time.time() - total_time_t0)/60} Min")
 max_lr = 6e-5
 min_lr = max_lr * 0.1
 max_steps = 100
-warmup_steps = int(0.05*max_steps)
+warmup_steps = int(0.03*max_steps)
 
 val_step_unit = int(max_steps/1)
 model_ckpt_step_unit = int(max_steps/1)
