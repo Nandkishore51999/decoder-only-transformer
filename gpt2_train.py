@@ -4,12 +4,12 @@ import nanoid
 
 total_time_t0 = time.time()
 
-data_dir = r"C:\Workspace-ML\text_data\BM"
+data_dir = "edu_fineweb10B"
 B = 8
-T = 512
+T = 1024
 GPTConfig.block_size = T
-train_loader = DataloaderLite(B=B, T=T, data="train", data_dir=data_dir)  # optimal value for RTX 4070ti (12GM VRAM) > 6, 1024 > 4, 1024
-val_loader = DataloaderLite(B=B, T=T, data="val", data_dir=data_dir)
+train_loader = DataLoaderNumpy(B=B, T=T, data="train", data_dir=data_dir)  # optimal value for RTX 4070ti (12GM VRAM) > 6, 1024 > 4, 1024
+val_loader = DataLoaderNumpy(B=B, T=T, data="val", data_dir=data_dir)
 
 print(f"Data Load Time: {(time.time() - total_time_t0)/60} Min")
 
