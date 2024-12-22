@@ -9,13 +9,15 @@ total_time_t0 = time.time()
 parser = argparse.ArgumentParser()
 parser.add_argument('--B', type=int, default=8)
 parser.add_argument('--T', type=int, default=1024)
-parser.add_argument('--max_steps', type=int, default=100)
+parser.add_argument('--max_steps', type=int, default=1_220_704)
 args = parser.parse_args()
 
 B = args.B  # Use the passed argument for the batch size
 T = args.T  # Use the passed argument for the batch size
 max_steps = args.max_steps  # Use the passed argument for the batch size
 
+print("--"*20)
+print(f"{B=} | {T=} | {max_steps=}")
 
 data_dir = "edu_fineweb10B"
 # B = 8
@@ -32,10 +34,10 @@ min_lr = max_lr * 0.1
 warmup_steps = int(0.03*max_steps)
 
 val_step_unit = int(max_steps/1)
-model_ckpt_step_unit = int(max_steps/1)
+model_ckpt_step_unit = [1_000, 10_000, 100_000, 500_000, 1_000_000, 2_000_000, 10_000_000]
 
 # create the log directory we will write checkpoints to and log to
-log_dir = f"log_{nanoid.generate(size=6)}_{GPTConfig.block_size}_BlockSize_{max_steps}_Steps_{B}_B_{T}_T"
+log_dir = f"log_{GPTConfig.block_size}_BlockSize_{max_steps}_Steps_{B}_B_{T}_T_{nanoid.generate(size=6)}"
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"log.txt")
 with open(log_file, "w") as f:
@@ -49,7 +51,7 @@ torch.cuda.manual_seed(42)
 torch.set_float32_matmul_precision('medium')
 USE_FLASH_ATTENTION=1
 print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
-# torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark = True
 
 model = GPT(GPTConfig())
 model.to(device)
@@ -58,7 +60,7 @@ model.to(device)
 # Basically, first it scan entire cod and check what are the operations happening and then optimize those.
 # aka Kernel fusion
 # as of Dec 2024, does not support on Windows
-# model = torch.compile(model)
+model = torch.compile(model)
 
 
 def get_lr(it):
@@ -83,7 +85,7 @@ for step in range(max_steps):
 
     last_step = (step == max_steps - 1)
 
-    if step % val_step_unit == 0 or last_step:
+    if step % val_step_unit == 0 or step in model_ckpt_step_unit or last_step:
         model.eval()
         # val_loader.reset()
         with torch.no_grad():
@@ -100,7 +102,7 @@ for step in range(max_steps):
         print(f"validation loss: {val_loss_accum.item():.4f}")
         with open(log_file, "a") as f:
             f.write(f"{step} val {val_loss_accum.item():.4f}\n")
-        if step > 0 and (step % model_ckpt_step_unit == 0 or last_step):
+        if step > 0 and (step in model_ckpt_step_unit or last_step):
             # optionally write model checkpoints
             checkpoint_path = os.path.join(log_dir, f"model_{step}.pt")
             checkpoint = {
@@ -135,10 +137,10 @@ for step in range(max_steps):
     optimizer.step()
     torch.cuda.synchronize()
     t2 = time.time()
-    dt = (t2-t1)*1000
+    dt = (t2-t1)
     tokens_per_sec = (train_loader.B * train_loader.T)/dt
 
-    print(f"Step: {step} | Loss: {loss.item()} | Lr: {lr:0.4e} | norm: {norm:.4f} | dt: {dt:.2f}ms | tokens/sec: {tokens_per_sec:.2f}")  # loss.item() will convert the tensor to float, so it lives in CPU.
+    print(f"Step:{step}| Loss: {loss.item():.4f} | Lr: {lr:0.2e} | norm: {norm:.2f} | dt: {dt*1000:.2f}ms | t/s: {tokens_per_sec:.2f}")  # loss.item() will convert the tensor to float, so it lives in CPU.
     with open(log_file, "a") as f:
         f.write(f"{step} train {loss.item():.6f}\n")
         f.write(f"{step} lr {lr:0.4e}\n")
@@ -147,7 +149,7 @@ print("total_epochs: ", no_epochs)
 
 # at starting point (first loss value), when probability of each vocab in our vocabulary is equal due to random initialization,
 # expected loss ~ -ln(1/50257) ~10.8
-print(loss)
+# print(loss)
 
 model_save_path = os.path.join(log_dir, f"gpt2_124M_Final.pt")
 torch.save(model.state_dict(), model_save_path)
