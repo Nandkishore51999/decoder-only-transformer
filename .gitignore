@@ -8,4 +8,4 @@ tb_logs
 nohup.out
 edu_fineweb10B/
 helloswag/
-_pycache_/
+__pycache__/
