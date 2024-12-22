@@ -6,5 +6,6 @@ tb_logs
 .idea
 .ipynb_checkpoints
 nohup.out
-edu_fineweb108
-helloswag
+edu_fineweb10B/
+helloswag/
+_pycache_/
