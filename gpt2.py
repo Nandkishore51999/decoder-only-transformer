@@ -117,6 +117,7 @@ class DataLoaderNumpy:
         self.current_position += B * T
         # if loading the next batch would be out of bounds, advance to next shard
         if self.current_position + (B * T + 1) > len(self.tokens):
+            print(f"Next shard reached! {self.current_shard}")
             self.current_shard = (self.current_shard + 1) % len(self.shards)
             self.tokens = load_tokens(self.shards[self.current_shard])
             self.current_position = B * T
