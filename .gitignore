@@ -1,7 +1,10 @@
 lightning_logs
-log_*
+log*
 *.log
 models
 tb_logs
 .idea
 .ipynb_checkpoints
+nohup.out
+edu_fineweb108
+helloswag
