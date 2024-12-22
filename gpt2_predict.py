@@ -28,7 +28,10 @@ def load_model(model_path):
         model = GPT(GPTConfig())
         model.to(device)
         checkpoint = torch.load(model_path)
-        model.load_state_dict(checkpoint['model'])
+        state_dict = checkpoint['model']
+        new_state_dict = {key.replace("_orig_mod.", ""): value for key, value in state_dict.items()}
+
+        model.load_state_dict(new_state_dict)
         model.eval()
         loaded_models[model_path] = model
     return loaded_models[model_path]
@@ -76,5 +79,5 @@ def generate_text():
 
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)
 
