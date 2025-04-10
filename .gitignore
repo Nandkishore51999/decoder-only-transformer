@@ -1,0 +1,26 @@
+# Ignore log files
+logs/
+log*/
+*.log
+log*.txt
+nohup.out
+
+
+# Ignore PyTorch temporary files
+*.pt
+*.pth
+
+# Ignore IDE-specific files
+.idea/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore Python cache files
+__pycache__/
+# Ignore temporary files
+
+
+1222/
+edu_fineweb10B/
+
