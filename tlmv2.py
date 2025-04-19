@@ -11,9 +11,11 @@ device = "cuda"
 
 batch_size = 1024
 block_size = 8
-max_iters = 1_000_000
+n_embd = int(768/2)
+
+max_iters = 1_000
 eval_iters = 100
-eval_interval = int(0.01*max_iters)
+eval_interval = int(0.1*max_iters)
 
 
 with open(r"C:\Workspace-ML\text_data\BM\ISS.txt", encoding="utf-8") as file:
@@ -86,12 +88,19 @@ def estimate_loss():
 
 
 class BigramLM(nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
-        self.token_embeding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embeding_table = nn.Embedding(vocab_size, n_embd)
+        self.pos_enc_table = nn.Embedding(block_size, n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
-        logits = self.token_embeding_table(idx)
+        B, T = idx.shape
+
+        token_emb = self.token_embeding_table(idx)
+        pos_enc = self.pos_enc_table(torch.arange(T, device=device))
+        x = token_emb + pos_enc
+        logits = self.lm_head(x)
 
         if targets is None:
             loss = None
@@ -113,7 +122,7 @@ class BigramLM(nn.Module):
         return idx
 
 
-model = BigramLM(vocab_size).to(device)
+model = BigramLM().to(device)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
