@@ -10,7 +10,7 @@ from torch.nn import functional as F
 device = "cuda"
 torch.set_default_device("cuda")
 
-batch_size = 1024
+batch_size = 32
 block_size = 8
 n_embd = int(768/2)
 n_heads = 8
@@ -124,9 +124,36 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, n_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(n_heads)])
+        self.proj = nn.Linear(n_embd, n_embd)
 
     def forward(self, x):
-        return torch.cat([h(x) for h in self.heads], dim=-1)
+        output = torch.cat([h(x) for h in self.heads], dim=-1)
+        output = self.proj(output)
+        return output
+
+class FFNN(nn.Module):
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4*n_embd),
+            nn.ReLU(),
+            nn.Linear(4*n_embd, n_embd)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Block(nn.Module):
+    def __init__(self, n_embd, n_heads, head_size):
+        super().__init__()
+        self.attention_head = MultiHeadAttention(n_heads, head_size)
+        self.ffnn = FFNN(n_embd)
+
+    def forward(self, x):
+        x = x + self.attention_head(x)
+        x = x + self.ffnn(x)
+        return x
 
 
 class BigramLM(nn.Module):
@@ -134,7 +161,12 @@ class BigramLM(nn.Module):
         super().__init__()
         self.token_embeding_table = nn.Embedding(vocab_size, n_embd)
         self.pos_enc_table = nn.Embedding(block_size, n_embd)
-        self.attention_head = MultiHeadAttention(n_heads, head_size)
+
+        self.block = nn.Sequential(
+            Block(n_embd, n_heads, head_size),
+            Block(n_embd, n_heads, head_size),
+            Block(n_embd, n_heads, head_size),
+        )
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -143,7 +175,7 @@ class BigramLM(nn.Module):
         token_emb = self.token_embeding_table(idx)
         pos_enc = self.pos_enc_table(torch.arange(T, device=device))
         x = token_emb + pos_enc
-        x = self.attention_head(x)
+        x = self.block(x)
         logits = self.lm_head(x)
 
         if targets is None:
