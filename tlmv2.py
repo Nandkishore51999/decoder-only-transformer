@@ -10,13 +10,15 @@ from torch.nn import functional as F
 device = "cuda"
 torch.set_default_device("cuda")
 
-batch_size = 32
-block_size = 8
-n_embd = int(768/2)
+batch_size = 32  # B
+block_size = 8  # T
+n_embd = 768
 n_heads = 8
 head_size = int(n_embd/n_heads)
+n_layer = 6
 
-learning_rate = 1e-3
+dropout = 0.2
+learning_rate = 3e-4
 
 max_iters = 1_000
 eval_iters = 100
@@ -106,6 +108,7 @@ class Head(nn.Module):
         self.tril = torch.tril(...) ===> Normal Python attribute. Doesn't move to GPU with model. Not saved.
         register_buffer(...)        ===> Non-trainable, moves with model, saved in .state_dict().
         """
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self,x):
         B,T,C = x.shape
@@ -114,6 +117,7 @@ class Head(nn.Module):
         wei = q @ k.transpose(-2, -1) * C**-0.5  # (B,T,C) @ (B,C,T) ---> (B,T,T)
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))  # (B,T,T)
         wei = F.softmax(wei, dim=-1)  # (B,T,T)
+        wei = self.dropout(wei)
 
         v = self.value(x)  # (B,T,C)
         output = wei @ v  # (B,T,T) @ (B,T,C) ---> (B,T,C)
@@ -125,11 +129,13 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(n_heads)])
         self.proj = nn.Linear(n_embd, n_embd)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         output = torch.cat([h(x) for h in self.heads], dim=-1)
-        output = self.proj(output)
+        output = self.dropout(self.proj(output))
         return output
+
 
 class FFNN(nn.Module):
     def __init__(self, n_embd):
@@ -137,7 +143,8 @@ class FFNN(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4*n_embd),
             nn.ReLU(),
-            nn.Linear(4*n_embd, n_embd)
+            nn.Linear(4*n_embd, n_embd),
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):
@@ -149,10 +156,12 @@ class Block(nn.Module):
         super().__init__()
         self.attention_head = MultiHeadAttention(n_heads, head_size)
         self.ffnn = FFNN(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
-        x = x + self.attention_head(x)
-        x = x + self.ffnn(x)
+        x = x + self.attention_head(self.ln1(x))
+        x = x + self.ffnn(self.ln2(x))
         return x
 
 
@@ -162,11 +171,8 @@ class BigramLM(nn.Module):
         self.token_embeding_table = nn.Embedding(vocab_size, n_embd)
         self.pos_enc_table = nn.Embedding(block_size, n_embd)
 
-        self.block = nn.Sequential(
-            Block(n_embd, n_heads, head_size),
-            Block(n_embd, n_heads, head_size),
-            Block(n_embd, n_heads, head_size),
-        )
+        self.blocks = nn.Sequential(*[Block(n_embd, n_heads, head_size) for _ in range(n_layer)])
+        self.ln_final = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -175,7 +181,8 @@ class BigramLM(nn.Module):
         token_emb = self.token_embeding_table(idx)
         pos_enc = self.pos_enc_table(torch.arange(T, device=device))
         x = token_emb + pos_enc
-        x = self.block(x)
+        x = self.blocks(x)
+        x = self.ln_final(x)
         logits = self.lm_head(x)
 
         if targets is None:
