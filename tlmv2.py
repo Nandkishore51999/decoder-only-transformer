@@ -10,19 +10,19 @@ from torch.nn import functional as F
 device = "cuda"
 torch.set_default_device("cuda")
 
-batch_size = 32  # B
-block_size = 8  # T
-n_embd = 768
+batch_size = 16  # B
+block_size = 512  # T
+n_embd = 1024
 n_heads = 8
 head_size = int(n_embd/n_heads)
 n_layer = 6
 
 dropout = 0.2
-learning_rate = 3e-4
+learning_rate = 3e-5
 
-max_iters = 1_000
+max_iters = 50_000
 eval_iters = 100
-eval_interval = int(0.1*max_iters)
+eval_interval = int(0.01*max_iters)
 
 
 with open(r"C:\Workspace-ML\text_data\BM\ISS.txt", encoding="utf-8") as file:
@@ -77,21 +77,6 @@ def get_batch(split):
     y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
-
-
-@torch.no_grad()
-def estimate_loss():
-    out = {}
-    model.eval()
-    for split in ["train", "val"]:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            X, Y = get_batch(split)
-            _, loss = model(X, Y)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
-    model.train()
-    return out
 
 
 class Head(nn.Module):
@@ -207,8 +192,25 @@ class BigramLM(nn.Module):
 
 
 model = BigramLM().to(device)
+print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+
+@torch.no_grad()
+def estimate_loss():
+    out = {}
+    model.eval()
+    for split in ["train", "val"]:
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            _, loss = model(X, Y)
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
+
 
 for iter in range(max_iters):
     if iter % eval_interval == 0:
@@ -225,5 +227,6 @@ for iter in range(max_iters):
 
 context = torch.zeros((1,1), dtype=torch.long, device=device)
 print(decode(model.generate(context, max_new_tokens=500)[0].tolist()))
+open('more.txt', 'w').write(decode(model.generate(context, max_new_tokens=10000)[0].tolist()))
 
 a = 5
