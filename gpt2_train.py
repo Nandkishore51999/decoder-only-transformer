@@ -1,4 +1,4 @@
-from gpt2 import *
+ from gpt2 import *
 import time
 import nanoid
 import argparse
@@ -88,6 +88,9 @@ for step in range(max_steps):
     if step % val_step_unit == 0 or step in model_ckpt_step_unit or last_step:
         model.eval()
         # val_loader.reset()
+
+        # torch.no_grad: disables gradient calculation, used for model inference/evaluation, saves space and time
+        # Without no_grad, PyTorch tracks all operations for backpropagation.
         with torch.no_grad():
             val_loss_accum = 0.0
             val_loss_steps = 20
