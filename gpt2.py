@@ -149,10 +149,18 @@ class CasualSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
-        # Not helpful for me since Triton is not compatible with Windows and cant install flash-attention library
+        """
+        # attention (materializes the large (T,T) matrix for all the queries and keys)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        """
+        
+        # Not helpful for me since Triton is not compatible with Windows and can't install the flash-attention library
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # flash attention
 
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble/concatenate all head outputs side by side
         # output projection
         y = self.c_proj(y)
         return y
@@ -161,6 +169,10 @@ class CasualSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
+
+        # Why GeLU over ReLU: To overcome the dead ReLU neuron problem.
+        # If ReLU: any activation that is applied on a negative input will end up not contributing anything to the gradient > no change > no development of the network.
+        # GeLU: always contributes to the local gradient. So it's always picked by BERT and GPT over ReLU.
         self.c_fc = nn.Linear(config.n_embd, 4*config.n_embd)
         self.gelu = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4*config.n_embd, config.n_embd)
@@ -182,14 +194,14 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
 
-    # attn: a communication operation where all token (i.e. 1024 communicate to each other and exchange information > a aggregation function > a weighted sum function
+    # attn: a communication operation where all tokens (i.e., 1024 communicate to each other and exchange information > an aggregation function > a weighted sum function
     # mlp: on individual tokens, no communication between tokens
-    # atten is a reduce fn and mlp is map fn
+    # atten is a reduce function, and mlp is a map function
 
-    # first they communicate and then think individually about the information that they gathered
+    # First, they communicate and then think individually about the information that they gathered
     def forward(self, x):
         x = x + self.attn(self.ln_1(x))  # first norm then attention
-        x = x + self.mlp(self.ln_2(x))  # first norm then mlp aka ffn (feed forward network)
+        x = x + self.mlp(self.ln_2(x))  # first norm then mlp/ffn (feed forward network)
         return x
 
 
@@ -198,13 +210,16 @@ class GPT(nn.Module):
         super().__init__()
         self.config = config
 
-        # all of these layers and modules have random initializer inside it by default.
+        # nn.ModuleDict: A container that holds submodules in a dict-like structure. 
+        # nn.ModuleList: A container that stores a list of submodules.
+        # nn.Embedding: A lookup table that maps word IDs to embeddings.
+        # All these layers and modules have a random initializer inside them by default.
         self.transformer = nn.ModuleDict(dict(
             wte=nn.Embedding(config.vocab_size, config.n_embd),
             wpe=nn.Embedding(config.block_size, config.n_embd),
             h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             # additional layer norm (not in transformer paper... but in gpt2 paper) Quoted:
-            # an additional layer normalization was added after the final self-attention block (after 12th block).
+            # An additional layer normalization was added after the final self-attention block (after the 12th block).
             ln_f=nn.LayerNorm(config.n_embd)
         ))
         # final classifier
@@ -212,7 +227,7 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         # weight sharing scheme
-        self.transformer.wte.weight = self.lm_head.weight  # try with and without this at training (30% reduction in model pramas count)
+        self.transformer.wte.weight = self.lm_head.weight  # try with and without this at training (30% reduction in model parameters count)
 
         # init params
         self.apply(self._init_weights)
@@ -233,8 +248,8 @@ class GPT(nn.Module):
         param_dict = {pn: p for pn, p in self.named_parameters()}
         param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
 
-        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
-        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        # create optim groups. Any 2D parameters will be weight decayed; otherwise, no.
+        # i.e., all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
         decay_params = [p for n,p in param_dict.items() if p.dim() >= 2]
         nodecay_params = [p for n,p in param_dict.items() if p.dim() < 2]
 
@@ -256,8 +271,8 @@ class GPT(nn.Module):
 
     def forward(self, idx, targets=None):
         # idx is of shape (B,T)
-        # each row max length of block size, each element in row reprents a token
-        # we have B independent sequences stacked up in batch so that this is efficient
+        # each row max length of block size, each element in a row represents a token
+        # We have B independent sequences stacked up in a batch, so that this is efficient
         B, T = idx.size()
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is {config.block_size}"
 
